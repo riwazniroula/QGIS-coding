@@ -1,0 +1,148 @@
+#REMOTE SENSING ASSIGNMENT
+#Riwaz Niroula, Sushmita Gurung, Swetha Dokku
+
+#Load libraries ----------------------------------------------------------------
+library(terra)
+library(gdata)
+library(corrplot)
+library(sf)
+library(pracma)
+library(dplyr)
+library(ggplot2)
+library(cluster)
+library(stats)
+library(factoextra)
+
+#Set WD ------------------------------------------------------------------------
+path <- "D:/qgis assignment work/2013 bands"
+setwd(path)
+
+#Read all the available bands --------------------------------------------------
+bands <- c('aerosolx', 'bluex', 'redx', 'greenx', 'NIRx', 'SWR1x', 'SWR2x')
+Nbands <- length(bands)
+
+#Read the vector file ----------------------------------------------------------
+fname <- 'D:/qgis assignment work/2013 bands/JasperAEA.gpkg' 
+jasper <- vect(fname)
+plot(jasper)
+
+#Read the raster and clip/mask -------------------------------------------------
+for (i in seq(1, Nbands, 1)) {
+  fname <- paste('Band', i, '.tif', sep = "")
+  x <- rast(fname)
+  x <- crop(x, jasper)
+  plot(x)
+  assign(bands[i], x)
+}
+
+#Create raster------------------------------------------------------------------
+jasperlsat <- c(aerosolx, bluex, greenx, redx, NIRx, SWR1x, SWR2x)
+writeRaster(jasperlsat, "jasperallbands.tif", filetype = "GTiff", overwrite = TRUE)
+
+#Plot each bands separately-----------------------------------------------------
+par(mfrow = c(2, 3))  
+for (i in 1:7) {
+  plot(jasperlsat[[i]], main = paste("Band", i), col = terrain.colors(255))
+}
+
+#Boxplot -----------------------------------------------------------------------
+bandnames <- c('Aerosol', 'Blue', 'Green', 'Red', 'NIR', 'SWIR1',  'SWIR2')
+f <- boxplot(jasperlsat, axes = FALSE, outline = FALSE, ylab = 'Value', notch = FALSE)
+axis(1, at = 1:Nbands, labels = bandnames, las = 2)
+axis(2)
+title('Digital numbers for Various Bands in Jasper')
+grid()
+box()
+
+#Data frame --------------------------------------------------------------------
+banddf <- as.data.frame(jasperlsat, xy = TRUE)
+banddf <- na.omit(banddf)
+colnames(banddf) <- c('X', 'Y', bandnames)
+
+#Correlation between bands -----------------------------------------------------
+corbands <- cor(banddf[, 3:9], method = 'pearson')
+corrplot(corbands, method = 'number', type = 'lower', diag = FALSE)
+
+#Clamp -------------------------------------------------------------------------
+clamped_jasperlsat <- clamp(jasperlsat, lower = 0, upper = 10000)
+
+#Boxplot -----------------------------------------------------------------------
+boxplot(clamped_jasperlsat, main = "Pixel Value Distribution Across Bands",
+        xlab = "Bands", ylab = "Pixel Values")
+
+#Histogram Equalization -------------------------------------------------------- 
+LL <- 0.05
+UL <- 0.95
+bandnamec <- c()
+for (i in seq(1, Nbands, 1)) {
+  bname <- paste(bands[i], 'c', sep = "")
+  xmin <- quantile(banddf[, (i + 2)], LL, na.rm = TRUE)
+  xmax <- quantile(banddf[, (i + 2)], UL, na.rm = TRUE)
+  x <- clamp(jasperlsat[[i]], lower = xmin, upper = xmax, values = TRUE)
+  assign(bname, x)
+  bandnamec[i] <- bname
+}
+
+#RGB and FCC Plots -------------------------------------------------------------
+lsatjasperc <- c(aerosolxc, bluexc, greenxc, redxc, NIRxc, SWR1xc, SWR2xc)
+plotRGB(lsatjasperc, r = 4, g = 3, b = 2, stretch = 'hist')
+plotRGB(jasperlsat, r = 5, g = 3, b = 2, stretch = 'hist')
+
+#-hisot sizing-----------------------------------
+par(mar = c(3, 3, 2, 2))
+
+# Plot histogram with cleaned data
+hist(lsatjasperc, main = "Histogram of Clamped Pixel Values",
+     xlab = "Pixel Values", ylab = "Frequency", col = "lightblue")
+
+#Histogram ---------------------------------------------------------------------
+hist(lsatjasperc)
+
+#Data frame --------------------------------------------------------------------
+bandcdf <- as.data.frame(jasperlsat, xy = TRUE, geom = 'WKT')
+bandcdf <- na.omit(bandcdf)
+colnames(bandcdf) <- c('X', 'Y', bandnames, 'WKT')
+
+#Bands correlation -------------------------------------------------------------
+corbands <- cor(bandcdf[, 3:8], method = 'spearman')
+corrplot(corbands, method = 'number', type = 'lower', diag = FALSE)
+
+#Reporojection Latitude and Longitude ------------------------------------------
+crsaea <- crs(lsatjasperc, proj = TRUE)
+crs84 <- 4326
+banddf.SP <- st_as_sf(bandcdf, coords = c('X', 'Y'), crs = crsaea)
+banddf.SP$XAEA <- st_coordinates(banddf.SP)[, 1]
+banddf.SP$YAEA <- st_coordinates(banddf.SP)[, 2]
+bandcdf.SP <- st_transform(x = banddf.SP, crs = crs84)
+bandcdf.SP$Lon <- st_coordinates(bandcdf.SP)[, 1]
+bandcdf.SP$Lat <- st_coordinates(bandcdf.SP)[, 2]
+
+#Write a CSV file --------------------------------------------------------------
+bandcdf.SP <- subset(bandcdf.SP, select = -c(WKT, geometry))
+write.csv(bandcdf.SP, 'bandcdf.csv', row.names = FALSE)
+
+#PCA ---------------------------------------------------------------------------
+pca <- prcomp(bandcdf[, 3:8], scale = TRUE)
+pcadata <- pca$x
+write.csv(pcadata[, 1:3], 'pcdata.csv', row.names = FALSE)
+
+head(pca$rotation)
+pc1 <- pca$x[, 2]
+pc2 <- pca$x[, 3]
+
+#Visualize the data points -----------------------------------------------------
+ggplot(bandcdf[, 3:6], aes(x = pc1, y = pc2, color = "pink")) +
+  geom_point() +
+  labs(title = "First Two Principal Components",
+       x = "PC1", y = "PC2")
+
+#kmeans Clustering -------------------------------------------------------------
+bpcaclust <- kmeans(pcadata[, 1:3], centers = 5, nstart = 10)
+
+summary(bpcaclust)
+
+#Clusters ----------------------------------------------------------------------
+library(factoextra)
+fviz_cluster(bpcaclust, data = pcadata[, 1:3], geom = "point", ellipse.type = 'convex')
+
+#---------------------------------THE END---------------------------------------
