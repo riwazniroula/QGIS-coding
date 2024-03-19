@@ -1,7 +1,7 @@
 #REMOTE SENSING ASSIGNMENT
 #Group members:
 #Riwaz Niroula (L20576749), Swetha Dokku (L20579435), Sushmita Gurung (L20527352)
-
+#THIS CODE IS FOR THE YEAR 1984 ONLY CHANGE THE YEAR AND WORKING DIRECTORY ACCORDINGLY
 
 #Load necessary libraries ----------------------------------------------------------------
 library(terra)
